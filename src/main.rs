@@ -32,23 +32,25 @@ type Sand = Vec<Cell>;
 // --- Core types --------------------------------------------------------------
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PieceColor {
-    Coral,
-    Orange,
-    Yellow,
+    Red,
+    // Coral,
+    // Orange,
+    // Yellow,
     Green,
-    Cyan,
+    // Cyan,
     Blue,
-    Purple,
+    // Purple,
 }
 
-const ALL_COLORS: [PieceColor; 7] = [
-    PieceColor::Coral,
-    PieceColor::Orange,
-    PieceColor::Yellow,
+const ALL_COLORS: [PieceColor; 3] = [
+    PieceColor::Red,
+    // PieceColor::Coral,
+    // PieceColor::Orange,
+    // PieceColor::Yellow,
     PieceColor::Green,
-    PieceColor::Cyan,
+    // PieceColor::Cyan,
     PieceColor::Blue,
-    PieceColor::Purple,
+    // PieceColor::Purple,
 ];
 
 impl PieceColor {
@@ -58,13 +60,14 @@ impl PieceColor {
 
     fn color(self) -> Color {
         match self {
-            Self::Coral => Color::new(255, 105, 97, 255),
-            Self::Orange => Color::new(255, 159, 67, 255),
-            Self::Yellow => Color::new(255, 220, 80, 255),
+            Self::Red => Color::new(255, 105, 97, 255),
+            // Self::Coral => Color::new(255, 105, 97, 255),
+            // Self::Orange => Color::new(255, 159, 67, 255),
+            // Self::Yellow => Color::new(255, 220, 80, 255),
             Self::Green => Color::new(91, 207, 121, 255),
-            Self::Cyan => Color::new(66, 210, 214, 255),
+            // Self::Cyan => Color::new(66, 210, 214, 255),
             Self::Blue => Color::new(91, 145, 255, 255),
-            Self::Purple => Color::new(183, 115, 235, 255),
+            // Self::Purple => Color::new(183, 115, 235, 255),
         }
     }
 }
