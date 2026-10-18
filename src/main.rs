@@ -27,7 +27,11 @@ const CONTROL_HEIGHT: i32 = 64;
 const GRID_WIDTH: usize = (SCREEN_WIDTH / CELL_SIZE) as usize; // 80
 const GRID_HEIGHT: usize = ((GAME_AREA_BOTTOM - GAME_AREA_TOP) / CELL_SIZE) as usize; // 60
 
-const BASE_UPDATE_INTERVAL: Duration = Duration::from_millis(10);
+const DEFAULT_UPDATE_INTERVAL_MS: u64 = 10;
+const MIN_UPDATE_INTERVAL_MS: u64 = 1;
+const DROP_SPEED_SLIDER_X: i32 = 200;
+const DROP_SPEED_SLIDER_Y: i32 = 660;
+const DROP_SPEED_SLIDER_W: i32 = 400;
 const TOP_OUT_ROWS: usize = 4;
 
 type Sand = Vec<Cell>;
@@ -753,7 +757,25 @@ fn slider_hit(x: i32, y: i32) -> bool {
         && (SLIDER_Y - 14..=SLIDER_Y + SLIDER_H + 14).contains(&y)
 }
 
-fn draw_menu(volume: f32, d: &mut Canvas) {
+fn update_interval_from_slider_x(x: i32) -> u64 {
+    let position = (x - DROP_SPEED_SLIDER_X).clamp(0, DROP_SPEED_SLIDER_W);
+    DEFAULT_UPDATE_INTERVAL_MS
+        - (position as u64 * (DEFAULT_UPDATE_INTERVAL_MS - MIN_UPDATE_INTERVAL_MS)
+            / DROP_SPEED_SLIDER_W as u64)
+}
+
+fn update_interval_slider_hit(x: i32, y: i32) -> bool {
+    (DROP_SPEED_SLIDER_X - 10..=DROP_SPEED_SLIDER_X + DROP_SPEED_SLIDER_W + 10).contains(&x)
+        && (DROP_SPEED_SLIDER_Y - 14..=DROP_SPEED_SLIDER_Y + SLIDER_H + 14).contains(&y)
+}
+
+fn effective_update_interval_ms(base_interval_ms: u64, level: u32) -> u64 {
+    base_interval_ms
+        .saturating_sub(2 * u64::from(level))
+        .max(MIN_UPDATE_INTERVAL_MS)
+}
+
+fn draw_menu(volume: f32, update_interval_ms: u64, d: &mut Canvas) {
     d.draw_rectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, Color::new(0, 0, 0, 215));
     d.draw_text("MENU", 322, 380, 48, Color::RAYWHITE);
     d.draw_text(
@@ -781,7 +803,43 @@ fn draw_menu(volume: f32, d: &mut Canvas) {
         20,
         Color::LIGHTGRAY,
     );
-    draw_control_button("CLOSE", 306, 640, 188, CONTROL_HEIGHT, d);
+    d.draw_text(
+        &format!("Drop interval: {update_interval_ms} ms"),
+        DROP_SPEED_SLIDER_X,
+        610,
+        24,
+        Color::GOLD,
+    );
+    d.draw_rectangle(
+        DROP_SPEED_SLIDER_X,
+        DROP_SPEED_SLIDER_Y,
+        DROP_SPEED_SLIDER_W,
+        SLIDER_H,
+        Color::DARKGRAY,
+    );
+    let fill = ((DEFAULT_UPDATE_INTERVAL_MS - update_interval_ms) as i32 * DROP_SPEED_SLIDER_W)
+        / (DEFAULT_UPDATE_INTERVAL_MS - MIN_UPDATE_INTERVAL_MS) as i32;
+    d.draw_rectangle(
+        DROP_SPEED_SLIDER_X,
+        DROP_SPEED_SLIDER_Y,
+        fill,
+        SLIDER_H,
+        Color::GOLD,
+    );
+    d.draw_circle(
+        DROP_SPEED_SLIDER_X + fill,
+        DROP_SPEED_SLIDER_Y + SLIDER_H / 2,
+        14.0,
+        Color::RAYWHITE,
+    );
+    d.draw_text(
+        "Drag to set speed: faster on the right (1 ms)",
+        DROP_SPEED_SLIDER_X,
+        DROP_SPEED_SLIDER_Y + 42,
+        20,
+        Color::LIGHTGRAY,
+    );
+    draw_control_button("CLOSE", 306, 740, 188, CONTROL_HEIGHT, d);
 }
 
 // --- Main -------------------------------------------------------------------------
@@ -822,6 +880,7 @@ async fn main() {
     }
 
     let mut menu_open = false;
+    let mut update_interval_ms = DEFAULT_UPDATE_INTERVAL_MS;
     let mut last_update = get_time();
 
     loop {
@@ -831,10 +890,9 @@ async fn main() {
         }
 
         let level = game.clears / 10;
-        let update_interval = BASE_UPDATE_INTERVAL
-            .saturating_sub(Duration::from_millis(2 * level as u64))
-            .max(Duration::from_millis(8))
-            .as_secs_f64();
+        let update_interval =
+            Duration::from_millis(effective_update_interval_ms(update_interval_ms, level))
+                .as_secs_f64();
         let (mouse_x, mouse_y) = {
             let (x, y) = mouse_position();
             (x as i32, y as i32)
@@ -871,7 +929,12 @@ async fn main() {
                 new_volume = volume_from_mouse_x(mouse_x);
             }
             volume = new_volume;
-            if clicked && hit_rect(mouse_x, mouse_y, 306, 640, 188, CONTROL_HEIGHT) {
+            if is_mouse_button_down(MouseButton::Left)
+                && update_interval_slider_hit(mouse_x, mouse_y)
+            {
+                update_interval_ms = update_interval_from_slider_x(mouse_x);
+            }
+            if clicked && hit_rect(mouse_x, mouse_y, 306, 740, 188, CONTROL_HEIGHT) {
                 menu_open = false;
             }
         } else if game.state == GameState::Playing {
@@ -965,7 +1028,7 @@ async fn main() {
 
         draw_game(&game, &grid, &mut d);
         if menu_open {
-            draw_menu(volume, &mut d);
+            draw_menu(volume, update_interval_ms, &mut d);
         }
         next_frame().await;
     }
@@ -1269,6 +1332,35 @@ mod tests {
             volume = step_volume(volume, -1);
         }
         assert_eq!(volume, 0.0);
+    }
+
+    #[test]
+    fn drop_speed_slider_maps_right_side_to_one_millisecond() {
+        assert_eq!(update_interval_from_slider_x(DROP_SPEED_SLIDER_X - 50), 10);
+        assert_eq!(
+            update_interval_from_slider_x(DROP_SPEED_SLIDER_X + DROP_SPEED_SLIDER_W / 2),
+            6
+        );
+        assert_eq!(
+            update_interval_from_slider_x(DROP_SPEED_SLIDER_X + DROP_SPEED_SLIDER_W + 50),
+            1
+        );
+        assert!(update_interval_slider_hit(
+            DROP_SPEED_SLIDER_X + 10,
+            DROP_SPEED_SLIDER_Y + 5
+        ));
+        assert!(!update_interval_slider_hit(
+            DROP_SPEED_SLIDER_X + 10,
+            DROP_SPEED_SLIDER_Y + 100
+        ));
+    }
+
+    #[test]
+    fn drop_interval_accelerates_with_level_but_never_below_one_millisecond() {
+        assert_eq!(effective_update_interval_ms(10, 0), 10);
+        assert_eq!(effective_update_interval_ms(10, 1), 8);
+        assert_eq!(effective_update_interval_ms(10, 5), 1);
+        assert_eq!(effective_update_interval_ms(1, 0), 1);
     }
 
     #[test]

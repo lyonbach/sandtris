@@ -10,7 +10,7 @@ A falling-sand puzzle game in Rust ([macroquad](https://macroquad.rs)). Connect 
 | W or ↑ | Rotate |
 | Space or click | Drop |
 | P | Pause |
-| M | Menu (volume) |
+| M | Menu (volume and 1–10 ms drop-speed slider) |
 | Enter | Restart after game over |
 
 ## Run natively
