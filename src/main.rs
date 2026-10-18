@@ -24,7 +24,7 @@ const GAME_AREA_BOTTOM: i32 = 800; // y where the playfield ends (exclusive)
 const GRID_WIDTH: usize = (SCREEN_WIDTH / CELL_SIZE) as usize; // 80
 const GRID_HEIGHT: usize = ((GAME_AREA_BOTTOM - GAME_AREA_TOP) / CELL_SIZE) as usize; // 60
 
-const BASE_UPDATE_INTERVAL: Duration = Duration::from_millis(40);
+const BASE_UPDATE_INTERVAL: Duration = Duration::from_millis(10);
 const TOP_OUT_ROWS: usize = 4;
 
 type Sand = Vec<Cell>;
