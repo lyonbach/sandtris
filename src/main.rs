@@ -20,6 +20,9 @@ const SCREEN_HEIGHT: i32 = 1000;
 const CELL_SIZE: i32 = 10;
 const GAME_AREA_TOP: i32 = 200; // y where the playfield starts
 const GAME_AREA_BOTTOM: i32 = 800; // y where the playfield ends (exclusive)
+const CONTROL_ROW_TOP: i32 = 862;
+const CONTROL_ROW_BOTTOM: i32 = 928;
+const CONTROL_HEIGHT: i32 = 64;
 
 const GRID_WIDTH: usize = (SCREEN_WIDTH / CELL_SIZE) as usize; // 80
 const GRID_HEIGHT: usize = ((GAME_AREA_BOTTOM - GAME_AREA_TOP) / CELL_SIZE) as usize; // 60
@@ -581,6 +584,22 @@ fn draw_preview(shape: ShapeKind, turns: usize, color: PieceColor, grid: &Grid, 
     }
 }
 
+fn hit_rect(x: i32, y: i32, rect_x: i32, rect_y: i32, width: i32, height: i32) -> bool {
+    (rect_x..rect_x + width).contains(&x) && (rect_y..rect_y + height).contains(&y)
+}
+
+fn control_button_hit(x: i32, y: i32, index: usize) -> bool {
+    let button_x = 12 + index as i32 * 196;
+    hit_rect(x, y, button_x, CONTROL_ROW_TOP, 188, CONTROL_HEIGHT)
+}
+
+fn draw_control_button(label: &str, x: i32, y: i32, width: i32, height: i32, d: &mut Canvas) {
+    d.draw_rectangle(x, y, width, height, Color::new(48, 57, 76, 255));
+    d.draw_rectangle(x, y, width, 2, Color::new(102, 119, 153, 255));
+    let text_x = x + (width - label.len() as i32 * 10) / 2;
+    d.draw_text(label, text_x, y + (height - 20) / 2, 18, Color::RAYWHITE);
+}
+
 fn draw_game(game: &Game, grid: &Grid, d: &mut Canvas) {
     d.clear_background(Color::new(12, 15, 24, 255));
     d.draw_text("SANDTRIS", 32, 28, 38, Color::RAYWHITE);
@@ -635,16 +654,9 @@ fn draw_game(game: &Game, grid: &Grid, d: &mut Canvas) {
     );
 
     d.draw_text(
-        "A/D or arrows: aim   W/Up: rotate   Space/click: drop   P: pause   M: menu",
+        "Tap to drop in a column; connect colors wall to wall to clear.",
         32,
-        832,
-        18,
-        Color::LIGHTGRAY,
-    );
-    d.draw_text(
-        "Connect one color from the left wall to the right wall to destroy it.",
-        32,
-        864,
+        838,
         17,
         Color::GRAY,
     );
@@ -652,9 +664,9 @@ fn draw_game(game: &Game, grid: &Grid, d: &mut Canvas) {
     if matches!(game.state, GameState::Paused | GameState::GameOver) {
         d.draw_rectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, Color::new(0, 0, 0, 190));
         let (title, subtitle) = if game.state == GameState::Paused {
-            ("PAUSED", "Press P to continue")
+            ("PAUSED", "Press P or tap RESUME")
         } else {
-            ("GAME OVER", "Press Enter to play again")
+            ("GAME OVER", "Press Enter or tap PLAY AGAIN")
         };
         d.draw_text(title, 250, 420, 48, Color::RAYWHITE);
         d.draw_text(subtitle, 230, 482, 22, Color::LIGHTGRAY);
@@ -668,6 +680,30 @@ fn draw_game(game: &Game, grid: &Grid, d: &mut Canvas) {
             );
         }
     }
+    for (index, label) in ["LEFT", "RIGHT", "ROTATE", "DROP"].iter().enumerate() {
+        draw_control_button(
+            label,
+            12 + index as i32 * 196,
+            CONTROL_ROW_TOP,
+            188,
+            CONTROL_HEIGHT,
+            d,
+        );
+    }
+    let action_label = match game.state {
+        GameState::Paused => "RESUME",
+        GameState::GameOver => "PLAY AGAIN",
+        GameState::Playing => "PAUSE",
+    };
+    draw_control_button(
+        action_label,
+        206,
+        CONTROL_ROW_BOTTOM,
+        188,
+        CONTROL_HEIGHT,
+        d,
+    );
+    draw_control_button("MENU", 406, CONTROL_ROW_BOTTOM, 188, CONTROL_HEIGHT, d);
 }
 
 // --- Audio ------------------------------------------------------------------------
@@ -739,12 +775,13 @@ fn draw_menu(volume: f32, d: &mut Canvas) {
     );
 
     d.draw_text(
-        "Left/Right or drag: volume     M: close menu",
+        "Drag the slider to change volume",
         SLIDER_X,
         SLIDER_Y + 60,
         20,
         Color::LIGHTGRAY,
     );
+    draw_control_button("CLOSE", 306, 640, 188, CONTROL_HEIGHT, d);
 }
 
 // --- Main -------------------------------------------------------------------------
@@ -802,10 +839,22 @@ async fn main() {
             let (x, y) = mouse_position();
             (x as i32, y as i32)
         };
+        let clicked = is_mouse_button_pressed(MouseButton::Left);
 
         // The menu freezes the game but keeps the music playing so the volume
         // change is audible. It can't be opened while paused (music is muted).
-        if is_key_pressed(KeyCode::M) && game.state != GameState::Paused {
+        if (is_key_pressed(KeyCode::M)
+            || clicked
+                && hit_rect(
+                    mouse_x,
+                    mouse_y,
+                    406,
+                    CONTROL_ROW_BOTTOM,
+                    188,
+                    CONTROL_HEIGHT,
+                ))
+            && game.state != GameState::Paused
+        {
             menu_open = !menu_open;
             last_update = get_time();
         }
@@ -822,27 +871,50 @@ async fn main() {
                 new_volume = volume_from_mouse_x(mouse_x);
             }
             volume = new_volume;
+            if clicked && hit_rect(mouse_x, mouse_y, 306, 640, 188, CONTROL_HEIGHT) {
+                menu_open = false;
+            }
         } else if game.state == GameState::Playing {
-            if is_key_pressed(KeyCode::Left) || is_key_pressed(KeyCode::A) {
+            if is_key_pressed(KeyCode::Left)
+                || is_key_pressed(KeyCode::A)
+                || clicked && control_button_hit(mouse_x, mouse_y, 0)
+            {
                 game.aim_x = game.aim_x.saturating_sub(1);
             }
-            if is_key_pressed(KeyCode::Right) || is_key_pressed(KeyCode::D) {
+            if is_key_pressed(KeyCode::Right)
+                || is_key_pressed(KeyCode::D)
+                || clicked && control_button_hit(mouse_x, mouse_y, 1)
+            {
                 game.aim_x = (game.aim_x + 1).min(grid.width - 1);
             }
-            if is_key_pressed(KeyCode::Up) || is_key_pressed(KeyCode::W) {
+            if is_key_pressed(KeyCode::Up)
+                || is_key_pressed(KeyCode::W)
+                || clicked && control_button_hit(mouse_x, mouse_y, 2)
+            {
                 game.next_rotation = (game.next_rotation + 1) % 4;
             }
-            if is_key_pressed(KeyCode::Space) {
+            if is_key_pressed(KeyCode::Space) || clicked && control_button_hit(mouse_x, mouse_y, 3)
+            {
                 game.drop_shape(&grid);
             }
-            if is_mouse_button_pressed(MouseButton::Left)
+            if clicked
                 && mouse_y >= grid.origin_y
                 && mouse_y < grid.origin_y + grid.height as i32 * grid.cell_size
             {
                 game.aim_x = (mouse_x.clamp(0, SCREEN_WIDTH - 1) / grid.cell_size) as usize;
                 game.drop_shape(&grid);
             }
-            if is_key_pressed(KeyCode::P) {
+            if is_key_pressed(KeyCode::P)
+                || clicked
+                    && hit_rect(
+                        mouse_x,
+                        mouse_y,
+                        206,
+                        CONTROL_ROW_BOTTOM,
+                        188,
+                        CONTROL_HEIGHT,
+                    )
+            {
                 game.state = GameState::Paused;
             }
             if get_time() - last_update >= update_interval {
@@ -850,11 +922,31 @@ async fn main() {
                 last_update = get_time();
             }
         } else if game.state == GameState::Paused {
-            if is_key_pressed(KeyCode::P) {
+            if is_key_pressed(KeyCode::P)
+                || clicked
+                    && hit_rect(
+                        mouse_x,
+                        mouse_y,
+                        206,
+                        CONTROL_ROW_BOTTOM,
+                        188,
+                        CONTROL_HEIGHT,
+                    )
+            {
                 game.state = GameState::Playing;
                 last_update = get_time();
             }
-        } else if is_key_pressed(KeyCode::Enter) {
+        } else if is_key_pressed(KeyCode::Enter)
+            || clicked
+                && hit_rect(
+                    mouse_x,
+                    mouse_y,
+                    206,
+                    CONTROL_ROW_BOTTOM,
+                    188,
+                    CONTROL_HEIGHT,
+                )
+        {
             game = Game::new(&grid);
             last_update = get_time();
         }
