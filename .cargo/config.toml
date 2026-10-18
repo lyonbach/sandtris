@@ -1,0 +1,3 @@
+[target.wasm32-unknown-unknown]
+# Audio/GL imports are provided by mq_js_bundle.js at runtime.
+rustflags = ["-C", "link-arg=--allow-undefined"]
