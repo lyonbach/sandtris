@@ -19,16 +19,16 @@
         }
     </style>
 </head>
-    <body>
+    <body style="display: flex; justify-content: center; align-items: center; width: 100vw; height: 100vh; margin: 0; overflow: hidden;">
         <canvas id="glcanvas" tabindex="1"></canvas>
+        <script src="mq_js_bundle.js"></script>
         <script>
-            window.addEventListener('DOMContentLoaded', () => {
-                const script = document.createElement('script');
-                script.src = 'mq_js_bundle.js';
-                script.onload = () => {
+            window.addEventListener('load', () => {
+                if (typeof load === 'function') {
                     load('dustris.wasm');
-                };
-                document.body.appendChild(script);
+                } else {
+                    console.error('load function not found');
+                }
             });
         </script>
     </body>
