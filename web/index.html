@@ -2,39 +2,39 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Sandtris</title>
     <style>
-        html, body { width: 100%; height: 100%; margin: 0; background: #111; }
-        body { display: grid; place-items: center; overflow: hidden; }
+        html, body { 
+            width: 100%; 
+            height: 100%; 
+            margin: 0; 
+            padding: 0;
+            background: #111; 
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
         canvas {
             display: block;
             width: 100vw;
-            height: 100dvh;
-            max-width: 100vw;
-            max-height: 100dvh;
+            height: 100vh;
             object-fit: contain;
             touch-action: none;
             user-select: none;
         }
     </style>
 </head>
-    <body style="display: flex; justify-content: center; align-items: center; width: 100vw; height: 100vh; margin: 0; overflow: hidden; background: #111;">
-        <canvas id="glcanvas" tabindex="1"></canvas>
-        <script src="mq_js_bundle.js"></script>
-        <script>
-            window.addEventListener('load', () => {
-                const canvas = document.getElementById('glcanvas');
-                if (canvas) {
-                    if (typeof load === 'function') {
-                        load('dustris.wasm');
-                    } else {
-                        console.error('load function not found');
-                    }
-                } else {
-                    console.error('Canvas element not found');
-                }
-            });
-        </script>
-    </body>
+<body>
+    <canvas id="glcanvas" tabindex="1"></canvas>
+    <script src="mq_js_bundle.js"></script>
+    <script>
+        window.addEventListener('load', () => {
+            if (typeof load === 'function') {
+                load('dustris.wasm');
+            }
+        });
+    </script>
+</body>
 </html>
