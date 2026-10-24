@@ -22,6 +22,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Export HTML5 build
+        env:
+          HOME: /root
         run: |
           mkdir -p dist
           godot --path . --export "HTML5" dist/index.html
