@@ -2,6 +2,7 @@ extends Node2D
 
 const GameState = preload("res://scripts/game_state.gd")
 const GameBoard = preload("res://scripts/game_board.gd")
+const AudioManager = preload("res://scripts/audio_manager.gd")
 
 const BACKGROUND := Color("#0c0f18")
 const PANEL := Color("#20283b")
@@ -10,12 +11,13 @@ const TEXT := Color("#f5f6fa")
 const MUTED_TEXT := Color("#aab3c8")
 const ACCENT := Color("#ffcb00")
 const SAND_COLORS := [Color("#ff6961"), Color("#5bcf79"), Color("#5b91ff")]
-const SAND_TICK_INTERVAL := 0.025
+const SAND_TICK_INTERVAL := 0.02
 const CLEAR_CHECK_INTERVAL := 0.15
 const SAND_TEXTURE_REFRESH_INTERVAL := 0.05
 
 var game_state = GameState.new()
 var game = GameBoard.new()
+var audio = AudioManager.new()
 var ui := Control.new()
 var labels := {}
 var board_rect := Rect2()
@@ -46,6 +48,7 @@ func _ready() -> void:
 	game_state.load_settings()
 	ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(ui)
+	add_child(audio)
 	assert(get_viewport().connect("size_changed", self, "_on_viewport_size_changed") == OK)
 	_refresh_sand_texture()
 	update()
@@ -75,13 +78,17 @@ func _process(delta: float) -> void:
 		static_sand_changed = game.advance_sand() or static_sand_changed
 	if piece_tick_elapsed >= game.piece_tick_interval():
 		piece_tick_elapsed -= game.piece_tick_interval()
-		static_sand_changed = game.advance_piece() or static_sand_changed
+		var piece_locked = game.advance_piece()
+		if piece_locked:
+			audio.play_sand_settle()
+		static_sand_changed = piece_locked or static_sand_changed
 	if clear_check_elapsed >= CLEAR_CHECK_INTERVAL:
 		clear_check_elapsed -= CLEAR_CHECK_INTERVAL
 		cleared_particles = game.check_clears()
 		static_sand_changed = cleared_particles > 0 or static_sand_changed
 	if cleared_particles > 0:
 		_start_clear_effect(game.consume_clear_events())
+		audio.play_clear(game.combo_multiplier)
 	if static_sand_changed:
 		sand_texture_dirty = true
 	if sand_texture_dirty and sand_texture_refresh_elapsed >= SAND_TEXTURE_REFRESH_INTERVAL:
@@ -273,6 +280,7 @@ func _input(event: InputEvent) -> void:
 		return
 
 	var point = event.position
+	audio.activate()
 	if not game_state.onboarding_complete:
 		game_state.onboarding_complete = true
 		game_state.save_settings()
@@ -288,6 +296,7 @@ func _input(event: InputEvent) -> void:
 	if settings_button_rect.has_point(point):
 		game_state.haptics_enabled = not game_state.haptics_enabled
 		game_state.save_settings()
+		audio.play_button()
 		update()
 		return
 
@@ -299,6 +308,7 @@ func _input(event: InputEvent) -> void:
 	if board_rect.has_point(point) and game_started and not paused and not game.game_over:
 		var column = int((point.x - board_rect.position.x) / board_rect.size.x * GameBoard.WIDTH)
 		game.drop_at(clamp(column, 0, GameBoard.WIDTH - 1))
+		audio.play_piece_release()
 		_trigger_haptic()
 		update()
 
@@ -313,10 +323,12 @@ func _handle_play_button() -> void:
 		clear_check_elapsed = 0.0
 		sand_texture_dirty = true
 		_refresh_sand_texture()
+		audio.play_button()
 		return
 	paused = not paused
 	piece_tick_elapsed = 0.0
 	sand_tick_elapsed = 0.0
+	audio.play_button()
 
 func _handle_action(index: int) -> void:
 	match index:
@@ -327,10 +339,13 @@ func _handle_action(index: int) -> void:
 		2:
 			game.release_piece()
 			piece_tick_elapsed = 0.0
+			audio.play_piece_release()
 		3:
 			game.rotate(true)
 		4:
 			game.move(1)
+	if index != 2:
+		audio.play_button()
 	_trigger_haptic()
 	_record_score_if_needed()
 	update()
@@ -339,6 +354,7 @@ func _record_score_if_needed() -> void:
 	if game.game_over and not score_recorded:
 		score_recorded = true
 		game_state.record_score(game.score)
+		audio.play_game_over()
 
 func _start_clear_effect(events: Array) -> void:
 	shake_time = 0.16
