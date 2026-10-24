@@ -1,0 +1,28 @@
+name: Build Android debug APK
+
+on:
+  push:
+    branches: [mobile-dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: barichello/godot-ci:3.5.2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Export Android debug APK
+        env:
+          HOME: /root
+        run: |
+          mkdir -p build/android
+          godot --path . --export-debug "Android Debug" build/android/sandtris-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sandtris-debug-apk
+          path: build/android/sandtris-debug.apk
+          if-no-files-found: error
