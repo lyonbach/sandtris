@@ -23,6 +23,7 @@ jobs:
         env:
           HOME: /github/home
         run: |
+          apk add --no-cache curl unzip
           export ANDROID_SDK_ROOT="$HOME/android-sdk"
           export ANDROID_HOME="$ANDROID_SDK_ROOT"
           mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
