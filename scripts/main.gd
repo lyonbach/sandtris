@@ -41,6 +41,7 @@ var profile_draw_ms := 0.0
 var sand_image := Image.new()
 var sand_texture := ImageTexture.new()
 var sand_texture_dirty := true
+var last_touch_timestamp := -1000
 
 func _ready() -> void:
 	randomize()
@@ -276,9 +277,16 @@ func _draw_onboarding(screen: Vector2, margin: float) -> void:
 	_set_onboarding_visible(true)
 
 func _input(event: InputEvent) -> void:
-	if not (event is InputEventScreenTouch and event.pressed) and not (event is InputEventMouseButton and event.pressed and event.button_index == BUTTON_LEFT):
+	var is_touch = event is InputEventScreenTouch and event.pressed
+	var is_mouse_click = event is InputEventMouseButton and event.pressed and event.button_index == BUTTON_LEFT
+	if not is_touch and not is_mouse_click:
 		return
 
+	var timestamp := OS.get_ticks_msec()
+	if is_mouse_click and timestamp - last_touch_timestamp < 100:
+		return
+	if is_touch:
+		last_touch_timestamp = timestamp
 	var point = event.position
 	audio.activate()
 	if not game_state.onboarding_complete:
