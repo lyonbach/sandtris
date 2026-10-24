@@ -50,8 +50,19 @@ jobs:
         env:
           HOME: /github/home
         run: |
+          export PATH="$HOME/android-sdk/build-tools/30.0.3:$PATH"
           mkdir -p build/android
           godot --path . --export-debug "Android Debug" build/android/sandtris-debug.apk
+          zipalign -f 4 build/android/sandtris-debug.apk build/android/sandtris-aligned.apk
+          apksigner sign \
+            --ks "$HOME/.android/debug.keystore" \
+            --ks-key-alias androiddebugkey \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out build/android/sandtris-signed.apk \
+            build/android/sandtris-aligned.apk
+          mv build/android/sandtris-signed.apk build/android/sandtris-debug.apk
+          apksigner verify --verbose build/android/sandtris-debug.apk
       - uses: actions/upload-artifact@v4
         with:
           name: sandtris-debug-apk
