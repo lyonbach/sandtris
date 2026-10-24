@@ -1,10 +1,12 @@
 class_name GameBoard
 extends Reference
 
-const WIDTH := 40
-const HEIGHT := 64
+const WIDTH := 80
+const HEIGHT := 128
 const EMPTY := -1
-const PARTICLE_SCALE := 4
+const PARTICLE_SCALE := 8
+const COMBO_WINDOW_SECONDS := 1.4
+const SPAWN_COLUMN := 40
 
 const BASE_SHAPES := [
 	[Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(2, 1)],
@@ -18,7 +20,7 @@ var cells := []
 var active_cells := []
 var active_origin := Vector2()
 var active_color := 0
-var aim_x = 20
+var aim_x = SPAWN_COLUMN
 var score := 0
 var clears := 0
 var game_over := false
@@ -26,6 +28,9 @@ var next_shape_index := 0
 var next_color := 0
 var is_dropping := false
 var drop_steps := 0
+var clear_events := []
+var combo_multiplier := 1
+var combo_time_remaining := 0.0
 
 func _init() -> void:
 	reset()
@@ -38,35 +43,48 @@ func reset() -> void:
 			row.append(EMPTY)
 		cells.append(row)
 	active_cells.clear()
-	aim_x = 20
+	aim_x = SPAWN_COLUMN
 	score = 0
 	clears = 0
 	game_over = false
 	is_dropping = false
 	drop_steps = 0
+	clear_events.clear()
+	combo_multiplier = 1
+	combo_time_remaining = 0.0
 	_choose_next_piece()
 	_spawn_piece()
 
-func advance_piece() -> int:
+func advance_piece() -> bool:
 	if game_over:
-		return 0
+		return false
 	if active_cells.empty():
 		_spawn_piece()
+		return false
+	var next_origin = active_origin + Vector2.DOWN
+	if _can_place(next_origin, active_cells):
+		active_origin = next_origin
+		if is_dropping:
+			drop_steps += 1
 	else:
-		var next_origin = active_origin + Vector2.DOWN
-		if _can_place(next_origin, active_cells):
-			active_origin = next_origin
-			if is_dropping:
-				drop_steps += 1
-		else:
-			_lock_piece()
+		_lock_piece()
+		return true
+	return false
+
+func advance_sand() -> bool:
+	if game_over:
+		return false
+	return _advance_sand()
+
+func check_clears() -> int:
 	return _clear_connected_colors()
 
-func advance_sand() -> int:
-	if game_over:
-		return 0
-	_advance_sand()
-	return _clear_connected_colors()
+func update_combo(delta: float) -> void:
+	if combo_time_remaining <= 0.0:
+		return
+	combo_time_remaining = max(0.0, combo_time_remaining - delta)
+	if combo_time_remaining == 0.0:
+		combo_multiplier = 1
 
 func move(direction: int) -> void:
 	if game_over or active_cells.empty():
@@ -126,8 +144,8 @@ func drop_at(column: int) -> void:
 
 func piece_tick_interval() -> float:
 	if not is_dropping:
-		return 0.20
-	return max(0.035, 0.11 - drop_steps * 0.008)
+		return 0.08
+	return max(0.014, 0.045 - drop_steps * 0.003)
 
 func get_cell(column: int, row: int) -> int:
 	return cells[row][column]
@@ -140,6 +158,11 @@ func get_active_world_cells() -> Array:
 
 func get_next_cells() -> Array:
 	return _scaled_shape(BASE_SHAPES[next_shape_index])
+
+func consume_clear_events() -> Array:
+	var events = clear_events
+	clear_events = []
+	return events
 
 func _spawn_piece() -> void:
 	active_cells = _scaled_shape(BASE_SHAPES[next_shape_index])
@@ -177,21 +200,26 @@ func _lock_piece() -> void:
 	active_cells.clear()
 	_spawn_piece()
 
-func _advance_sand() -> void:
+func _advance_sand() -> bool:
+	var moved := false
 	for row in range(HEIGHT - 2, -1, -1):
 		for column in range(WIDTH):
 			if cells[row][column] == EMPTY:
 				continue
-			var destination = Vector2(column, row + 1)
-			if cells[int(destination.y)][int(destination.x)] == EMPTY:
-				_move_cell(column, row, int(destination.x), int(destination.y))
+			if cells[row + 1][column] == EMPTY:
+				_move_cell(column, row, column, row + 1)
+				moved = true
 				continue
-			var direction = -1 if randi() % 2 == 0 else 1
-			for offset in [direction, -direction]:
-				var diagonal_column = column + offset
-				if diagonal_column >= 0 and diagonal_column < WIDTH and cells[row + 1][diagonal_column] == EMPTY:
-					_move_cell(column, row, diagonal_column, row + 1)
-					break
+			var can_move_left = column > 0 and cells[row + 1][column - 1] == EMPTY
+			var can_move_right = column < WIDTH - 1 and cells[row + 1][column + 1] == EMPTY
+			if not can_move_left and not can_move_right:
+				continue
+			var diagonal_column := column - 1
+			if can_move_right and (not can_move_left or randi() % 2 == 0):
+				diagonal_column = column + 1
+			_move_cell(column, row, diagonal_column, row + 1)
+			moved = true
+	return moved
 
 func _move_cell(from_column: int, from_row: int, to_column: int, to_row: int) -> void:
 	cells[to_row][to_column] = cells[from_row][from_column]
@@ -199,6 +227,7 @@ func _move_cell(from_column: int, from_row: int, to_column: int, to_row: int) ->
 
 func _clear_connected_colors() -> int:
 	var cleared_particles = 0
+	var cleared_groups = 0
 	var visited = []
 	for _row in range(HEIGHT):
 		var row = []
@@ -219,10 +248,18 @@ func _clear_connected_colors() -> int:
 				touches_right = touches_right or int(position.x) == WIDTH - 1
 			if touches_left and touches_right:
 				for position in group:
+					clear_events.append({"position": position, "color": color})
 					cells[int(position.y)][int(position.x)] = EMPTY
-				score += group.size() * 25
-				clears += 1
 				cleared_particles += group.size()
+				cleared_groups += 1
+	if cleared_particles > 0:
+		if combo_time_remaining > 0.0:
+			combo_multiplier += 1
+		else:
+			combo_multiplier = 1
+		combo_time_remaining = COMBO_WINDOW_SECONDS
+		score += cleared_particles * 25 * combo_multiplier
+		clears += cleared_groups
 	return cleared_particles
 
 func _connected_group(start_column: int, start_row: int, color: int, visited: Array) -> Array:

@@ -9,9 +9,10 @@ const PANEL_ACTIVE := Color("#35415e")
 const TEXT := Color("#f5f6fa")
 const MUTED_TEXT := Color("#aab3c8")
 const ACCENT := Color("#ffcb00")
-const GRID_LINE := Color(0.33, 0.40, 0.57, 0.14)
 const SAND_COLORS := [Color("#ff6961"), Color("#5bcf79"), Color("#5b91ff")]
-const SAND_TICK_INTERVAL := 0.05
+const SAND_TICK_INTERVAL := 0.025
+const CLEAR_CHECK_INTERVAL := 0.15
+const SAND_TEXTURE_REFRESH_INTERVAL := 0.05
 
 var game_state = GameState.new()
 var game = GameBoard.new()
@@ -25,45 +26,73 @@ var game_started := false
 var paused := false
 var piece_tick_elapsed := 0.0
 var sand_tick_elapsed := 0.0
+var clear_check_elapsed := 0.0
+var sand_texture_refresh_elapsed := 0.0
 var score_recorded := false
 var shake_time := 0.0
 var shake_strength := 0.0
 var clear_flash := 0.0
+var clear_particles := []
+var profiling_enabled := false
+var profile_update_ms := 0.0
+var profile_draw_ms := 0.0
+var sand_image := Image.new()
+var sand_texture := ImageTexture.new()
+var sand_texture_dirty := true
 
 func _ready() -> void:
 	randomize()
+	profiling_enabled = OS.is_debug_build()
 	game_state.load_settings()
 	ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(ui)
 	assert(get_viewport().connect("size_changed", self, "_on_viewport_size_changed") == OK)
+	_refresh_sand_texture()
 	update()
 
 func _on_viewport_size_changed() -> void:
 	update()
 
 func _process(delta: float) -> void:
-	var effect_active := shake_time > 0.0 or clear_flash > 0.0
+	var particles_active := _advance_clear_particles(delta)
+	var effect_active := shake_time > 0.0 or clear_flash > 0.0 or particles_active
 	shake_time = max(0.0, shake_time - delta)
 	clear_flash = max(0.0, clear_flash - delta * 4.0)
 	if effect_active:
 		update()
 	if not game_started or paused or game.game_over:
 		return
+	var update_started_at := OS.get_ticks_usec()
+	game.update_combo(delta)
 	piece_tick_elapsed += delta
 	sand_tick_elapsed += delta
+	clear_check_elapsed += delta
+	sand_texture_refresh_elapsed += delta
 	var cleared_particles := 0
+	var static_sand_changed := false
 	while sand_tick_elapsed >= SAND_TICK_INTERVAL:
 		sand_tick_elapsed -= SAND_TICK_INTERVAL
-		cleared_particles += game.advance_sand()
+		static_sand_changed = game.advance_sand() or static_sand_changed
 	if piece_tick_elapsed >= game.piece_tick_interval():
 		piece_tick_elapsed -= game.piece_tick_interval()
-		cleared_particles += game.advance_piece()
+		static_sand_changed = game.advance_piece() or static_sand_changed
+	if clear_check_elapsed >= CLEAR_CHECK_INTERVAL:
+		clear_check_elapsed -= CLEAR_CHECK_INTERVAL
+		cleared_particles = game.check_clears()
+		static_sand_changed = cleared_particles > 0 or static_sand_changed
 	if cleared_particles > 0:
-		_start_clear_effect(cleared_particles)
+		_start_clear_effect(game.consume_clear_events())
+	if static_sand_changed:
+		sand_texture_dirty = true
+	if sand_texture_dirty and sand_texture_refresh_elapsed >= SAND_TEXTURE_REFRESH_INTERVAL:
+		_refresh_sand_texture()
 	_record_score_if_needed()
+	if profiling_enabled:
+		profile_update_ms = float(OS.get_ticks_usec() - update_started_at) / 1000.0
 	update()
 
 func _draw() -> void:
+	var draw_started_at := OS.get_ticks_usec()
 	var screen := get_viewport_rect().size
 	ui.rect_size = screen
 	var margin := screen.x * 0.055
@@ -85,11 +114,22 @@ func _draw() -> void:
 		_draw_onboarding(screen, margin)
 	else:
 		_set_onboarding_visible(false)
+	if profiling_enabled:
+		profile_draw_ms = float(OS.get_ticks_usec() - draw_started_at) / 1000.0
 
 func _draw_header(margin: float, header_height: float, content_width: float) -> void:
 	_label("title", "SANDTRIS", Rect2(margin, header_height * 0.12, 260.0, 42.0), TEXT)
 	_label("score", "SCORE  %06d" % game.score, Rect2(margin, header_height * 0.48, 250.0, 26.0), ACCENT)
 	_label("best", "BEST  %06d" % game_state.high_score, Rect2(margin, header_height * 0.72, 250.0, 24.0), MUTED_TEXT)
+	_label("combo", "COMBO x%d" % game.combo_multiplier, Rect2(margin + 280.0, header_height * 0.50, 148.0, 24.0), ACCENT)
+	labels["combo"].visible = game.combo_multiplier > 1
+	if profiling_enabled:
+		_label(
+			"performance",
+			"%03d FPS  |  %.2f ms SIM  |  %.2f ms DRAW" % [Engine.get_frames_per_second(), profile_update_ms, profile_draw_ms],
+			Rect2(margin, header_height * 0.89, 350.0, 18.0),
+			MUTED_TEXT
+		)
 
 	settings_button_rect = Rect2(margin + content_width - 112.0, header_height * 0.24, 112.0, 52.0)
 	_draw_button(settings_button_rect, "SETTINGS", false, "settings")
@@ -126,20 +166,10 @@ func _draw_board() -> void:
 	var grid_size := Vector2(cell_size * columns, cell_size * rows)
 	var grid_origin := board_rect.position + (board_rect.size - grid_size) * 0.5
 
-	for column in range(columns + 1):
-		var x := grid_origin.x + column * cell_size
-		draw_line(Vector2(x, grid_origin.y), Vector2(x, grid_origin.y + grid_size.y), GRID_LINE, 0.5)
-	for row in range(rows + 1):
-		var y := grid_origin.y + row * cell_size
-		draw_line(Vector2(grid_origin.x, y), Vector2(grid_origin.x + grid_size.x, y), GRID_LINE, 0.5)
-
-	for row in range(GameBoard.HEIGHT):
-		for column in range(GameBoard.WIDTH):
-			var color_index = game.get_cell(column, row)
-			if color_index != GameBoard.EMPTY:
-				_draw_sand_cell(grid_origin, cell_size, column, row, color_index)
+	draw_texture_rect(sand_texture, Rect2(grid_origin, grid_size), false)
 	for position in game.get_active_world_cells():
 		_draw_sand_cell(grid_origin, cell_size, int(position.x), int(position.y), game.active_color)
+	_draw_clear_particles(grid_origin, cell_size)
 	if clear_flash > 0.0:
 		draw_rect(board_rect, Color(1.0, 0.8, 0.3, clear_flash * 0.16))
 
@@ -179,6 +209,24 @@ func _draw_sand_cell(origin: Vector2, cell_size: float, column: int, row: int, c
 		Vector2(cell_size - padding * 2.0, cell_size - padding * 2.0)
 	)
 	draw_rect(rect, _sand_color(color_index, column, row))
+
+func _refresh_sand_texture() -> void:
+	sand_image.create(GameBoard.WIDTH, GameBoard.HEIGHT, false, Image.FORMAT_RGBA8)
+	sand_image.lock()
+	for row in range(GameBoard.HEIGHT):
+		for column in range(GameBoard.WIDTH):
+			var color_index = game.get_cell(column, row)
+			var color := Color(0.0, 0.0, 0.0, 0.0)
+			if color_index != GameBoard.EMPTY:
+				color = _sand_color(color_index, column, row)
+			sand_image.set_pixel(column, row, color)
+	sand_image.unlock()
+	if sand_texture.get_width() == 0:
+		sand_texture.create_from_image(sand_image, 0)
+	else:
+		sand_texture.set_data(sand_image)
+	sand_texture_dirty = false
+	sand_texture_refresh_elapsed = 0.0
 
 func _sand_color(color_index: int, column: int, row: int) -> Color:
 	var color = SAND_COLORS[color_index]
@@ -262,6 +310,9 @@ func _handle_play_button() -> void:
 		score_recorded = false
 		piece_tick_elapsed = 0.0
 		sand_tick_elapsed = 0.0
+		clear_check_elapsed = 0.0
+		sand_texture_dirty = true
+		_refresh_sand_texture()
 		return
 	paused = not paused
 	piece_tick_elapsed = 0.0
@@ -289,12 +340,71 @@ func _record_score_if_needed() -> void:
 		score_recorded = true
 		game_state.record_score(game.score)
 
-func _start_clear_effect(cleared_particles: int) -> void:
+func _start_clear_effect(events: Array) -> void:
 	shake_time = 0.16
-	shake_strength = min(4.0, 1.5 + cleared_particles * 0.025)
+	shake_strength = min(4.0, 1.5 + events.size() * 0.025)
 	clear_flash = 1.0
+	var sample_stride := max(1, int(ceil(float(events.size()) / 96.0)))
+	var pattern := randi() % 6
+	for index in range(0, events.size(), sample_stride):
+		var event = events[index]
+		clear_particles.append(
+			{
+				"position": event["position"] + Vector2(0.5, 0.5),
+				"color": _sand_color(event["color"], int(event["position"].x), int(event["position"].y)),
+				"offset": Vector2.ZERO,
+				"velocity": Vector2(rand_range(-2.0, 2.0), rand_range(-3.4, -1.2)),
+				"delay": _clear_wave_delay(event["position"], pattern),
+				"life": 0.32 + randf() * 0.16
+			}
+		)
 	if game_state.haptics_enabled and OS.has_feature("mobile"):
 		Input.vibrate_handheld(35)
+
+func _advance_clear_particles(delta: float) -> bool:
+	for index in range(clear_particles.size() - 1, -1, -1):
+		var particle = clear_particles[index]
+		if particle["delay"] > 0.0:
+			particle["delay"] -= delta
+			continue
+		particle["life"] -= delta
+		if particle["life"] <= 0.0:
+			clear_particles.remove(index)
+			continue
+		var velocity = particle["velocity"]
+		velocity.y += 7.5 * delta
+		particle["velocity"] = velocity
+		var offset = particle["offset"]
+		particle["offset"] = offset + velocity * delta
+	return not clear_particles.empty()
+
+func _draw_clear_particles(origin: Vector2, cell_size: float) -> void:
+	for particle in clear_particles:
+		if particle["delay"] > 0.0:
+			continue
+		var color = particle["color"]
+		color.a = min(1.0, particle["life"] * 3.0)
+		var center = origin + (particle["position"] + particle["offset"]) * cell_size
+		draw_circle(center, max(1.0, cell_size * 0.22), color)
+
+func _clear_wave_delay(position: Vector2, pattern: int) -> float:
+	var horizontal := position.x / float(GameBoard.WIDTH - 1)
+	var vertical := position.y / float(GameBoard.HEIGHT - 1)
+	var distance := 0.0
+	match pattern:
+		0:
+			distance = min(horizontal, 1.0 - horizontal) * 2.0
+		1:
+			distance = abs(horizontal - 0.5) * 2.0
+		2:
+			distance = horizontal
+		3:
+			distance = 1.0 - horizontal
+		4:
+			distance = vertical
+		_:
+			distance = 1.0 - vertical
+	return distance * 0.32
 
 func _board_shake_offset() -> Vector2:
 	if shake_time <= 0.0:
