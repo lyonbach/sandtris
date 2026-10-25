@@ -211,10 +211,9 @@ func _draw_board() -> void:
 	labels["ready_hint"].visible = not hint.empty()
 
 func _draw_sand_cell(origin: Vector2, cell_size: float, column: int, row: int, color_index: int) -> void:
-	var padding := max(2.0, cell_size * 0.07)
 	var rect := Rect2(
-		origin + Vector2(column * cell_size + padding, row * cell_size + padding),
-		Vector2(cell_size - padding * 2.0, cell_size - padding * 2.0)
+		origin + Vector2(column * cell_size, row * cell_size),
+		Vector2(cell_size, cell_size)
 	)
 	draw_rect(rect, _sand_color(color_index, column, row))
 
