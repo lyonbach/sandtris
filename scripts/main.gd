@@ -16,6 +16,7 @@ const CLEAR_CHECK_INTERVAL := 0.15
 const SAND_TEXTURE_REFRESH_INTERVAL := 0.05
 const BOARD_DOUBLE_TAP_MSEC := 240
 const BOARD_DOUBLE_TAP_DISTANCE := 44.0
+const BOARD_DRAG_DISTANCE := 18.0
 
 var game_state = GameState.new()
 var game = GameBoard.new()
@@ -47,6 +48,9 @@ var last_touch_timestamp := -1000
 var pending_board_tap := false
 var pending_board_tap_position := Vector2.ZERO
 var pending_board_tap_timestamp := 0
+var board_drag_start_position := Vector2.ZERO
+var board_drag_active := false
+var board_gesture_active := false
 
 func _ready() -> void:
 	randomize()
@@ -275,12 +279,25 @@ func _draw_onboarding(screen: Vector2, margin: float) -> void:
 	var overlay := Rect2(margin, screen.y * 0.37, screen.x - margin * 2.0, screen.y * 0.26)
 	draw_style_box(_rounded_panel(), overlay)
 	_label("tutorial_title", "HOW TO PLAY", Rect2(overlay.position + Vector2(24.0, 24.0), Vector2(overlay.size.x - 48.0, 28.0)), TEXT)
-	_label("tutorial_one", "Use buttons to move and drop sand shapes.", Rect2(overlay.position + Vector2(24.0, 64.0), Vector2(overlay.size.x - 48.0, 24.0)), MUTED_TEXT)
+	_label("tutorial_one", "Drag the board to move pieces. Use buttons to drop.", Rect2(overlay.position + Vector2(24.0, 64.0), Vector2(overlay.size.x - 48.0, 24.0)), MUTED_TEXT)
 	_label("tutorial_two", "Connect matching colors from wall to wall.", Rect2(overlay.position + Vector2(24.0, 94.0), Vector2(overlay.size.x - 48.0, 24.0)), MUTED_TEXT)
 	_label("tutorial_continue", "Tap board: rotate. Double-tap: drop.", Rect2(overlay.position + Vector2(24.0, 142.0), Vector2(overlay.size.x - 48.0, 24.0)), ACCENT)
 	_set_onboarding_visible(true)
 
 func _input(event: InputEvent) -> void:
+	if event is InputEventScreenTouch and not event.pressed:
+		board_gesture_active = false
+		return
+	if event is InputEventMouseButton and not event.pressed and event.button_index == BUTTON_LEFT:
+		board_gesture_active = false
+		return
+	if event is InputEventScreenDrag:
+		_handle_board_drag(event.position)
+		return
+	if event is InputEventMouseMotion and event.button_mask & BUTTON_MASK_LEFT:
+		_handle_board_drag(event.position)
+		return
+
 	var is_touch = event is InputEventScreenTouch and event.pressed
 	var is_mouse_click = event is InputEventMouseButton and event.pressed and event.button_index == BUTTON_LEFT
 	if not is_touch and not is_mouse_click:
@@ -318,6 +335,9 @@ func _input(event: InputEvent) -> void:
 			return
 
 	if board_rect.has_point(point) and game_started and not paused and not game.game_over:
+		board_drag_start_position = point
+		board_drag_active = false
+		board_gesture_active = true
 		_handle_board_tap(point, timestamp)
 
 func _process_pending_board_tap() -> void:
@@ -343,6 +363,22 @@ func _handle_board_tap(point: Vector2, timestamp: int) -> void:
 	pending_board_tap = true
 	pending_board_tap_position = point
 	pending_board_tap_timestamp = timestamp
+
+func _handle_board_drag(point: Vector2) -> void:
+	if not board_gesture_active or not game_started or paused or game.game_over:
+		return
+	if not board_drag_active:
+		if point.distance_to(board_drag_start_position) < BOARD_DRAG_DISTANCE:
+			return
+		board_drag_active = true
+		pending_board_tap = false
+	if not board_rect.has_point(point):
+		return
+	var column = int((point.x - board_rect.position.x) / board_rect.size.x * GameBoard.WIDTH)
+	if game.move_to(clamp(column, 0, GameBoard.WIDTH - 1)):
+		audio.play_button()
+		_trigger_haptic(12)
+		update()
 
 func _handle_play_button() -> void:
 	if not game_started or game.game_over:

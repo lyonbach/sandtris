@@ -102,6 +102,22 @@ func move(direction: int) -> void:
 		active_origin = next_origin
 		aim_x = int(active_origin.x)
 
+func move_to(column: int) -> bool:
+	if game_over or active_cells.empty():
+		return false
+	var min_x = WIDTH
+	var max_x = 0
+	for cell in active_cells:
+		min_x = min(min_x, int(cell.x))
+		max_x = max(max_x, int(cell.x))
+	var target_x = int(clamp(column - int(float(max_x - min_x) * 0.5), 0, WIDTH - 1 - max_x))
+	var target_origin = Vector2(target_x, active_origin.y)
+	if target_origin == active_origin or not _can_place(target_origin, active_cells):
+		return false
+	active_origin = target_origin
+	aim_x = target_x
+	return true
+
 func rotate(clockwise: bool) -> void:
 	if game_over or active_cells.empty():
 		return
@@ -138,17 +154,8 @@ func release_piece() -> void:
 func drop_at(column: int) -> void:
 	if game_over or active_cells.empty():
 		return
-	var min_x = WIDTH
-	var max_x = 0
-	for cell in active_cells:
-		min_x = min(min_x, int(cell.x))
-		max_x = max(max_x, int(cell.x))
-	var target_x = int(clamp(column - int(float(max_x - min_x) * 0.5), 0, WIDTH - 1 - max_x))
-	var target_origin = Vector2(target_x, active_origin.y)
-	if _can_place(target_origin, active_cells):
-		active_origin = target_origin
-		aim_x = target_x
-		release_piece()
+	move_to(column)
+	release_piece()
 
 func piece_tick_interval() -> float:
 	if not is_dropping:
