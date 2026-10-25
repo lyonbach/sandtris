@@ -32,7 +32,7 @@ config/icon="res://assets/icon.svg"
 
 [display]
 
-window/handheld/orientation=1
+window/handheld/orientation="portrait"
 window/stretch/mode="2d"
 window/stretch/aspect="keep_width"
 window/size/viewport_width=720
