@@ -14,6 +14,8 @@ const SAND_COLORS := [Color("#ff6961"), Color("#5bcf79"), Color("#5b91ff")]
 const SAND_TICK_INTERVAL := 0.02
 const CLEAR_CHECK_INTERVAL := 0.15
 const SAND_TEXTURE_REFRESH_INTERVAL := 0.05
+const BOARD_DOUBLE_TAP_MSEC := 240
+const BOARD_DOUBLE_TAP_DISTANCE := 44.0
 
 var game_state = GameState.new()
 var game = GameBoard.new()
@@ -42,6 +44,9 @@ var sand_image := Image.new()
 var sand_texture := ImageTexture.new()
 var sand_texture_dirty := true
 var last_touch_timestamp := -1000
+var pending_board_tap := false
+var pending_board_tap_position := Vector2.ZERO
+var pending_board_tap_timestamp := 0
 
 func _ready() -> void:
 	randomize()
@@ -58,6 +63,7 @@ func _on_viewport_size_changed() -> void:
 	update()
 
 func _process(delta: float) -> void:
+	_process_pending_board_tap()
 	var particles_active := _advance_clear_particles(delta)
 	var effect_active := shake_time > 0.0 or clear_flash > 0.0 or particles_active
 	shake_time = max(0.0, shake_time - delta)
@@ -106,7 +112,7 @@ func _draw() -> void:
 	var margin := screen.x * 0.055
 	var content_width := screen.x - margin * 2.0
 	var header_height := max(150.0, screen.y * 0.15)
-	var controls_height := max(96.0, screen.y * 0.10)
+	var controls_height := max(128.0, screen.y * 0.12)
 	var board_height := min(content_width * 1.35, screen.y - header_height - controls_height - margin * 3.0)
 
 	draw_rect(Rect2(Vector2.ZERO, screen), BACKGROUND)
@@ -139,9 +145,9 @@ func _draw_header(margin: float, header_height: float, content_width: float) -> 
 			MUTED_TEXT
 		)
 
-	settings_button_rect = Rect2(margin + content_width - 112.0, header_height * 0.24, 112.0, 52.0)
+	settings_button_rect = Rect2(margin + content_width - 136.0, header_height * 0.20, 136.0, 64.0)
 	_draw_button(settings_button_rect, "SETTINGS", false, "settings")
-	play_button_rect = Rect2(settings_button_rect.position.x - 124.0, settings_button_rect.position.y, 112.0, 52.0)
+	play_button_rect = Rect2(settings_button_rect.position.x - 148.0, settings_button_rect.position.y, 136.0, 64.0)
 	var play_label := "PLAY"
 	if game_started and not game.game_over:
 		play_label = "RESUME" if paused else "PAUSE"
@@ -161,10 +167,11 @@ func _draw_next_piece(x: float, y: float, height: float) -> void:
 	var cell_size := min(4.0, height / (max_cell.y - min_cell.y + 1.0))
 	var preview_size := (max_cell - min_cell + Vector2.ONE) * cell_size
 	var origin := Vector2(x + 52.0, y + (height - preview_size.y) * 0.5)
-	for cell in preview_cells:
+	for index in range(preview_cells.size()):
+		var cell = preview_cells[index]
 		var relative_cell = cell - min_cell
 		var rect := Rect2(origin + relative_cell * cell_size, Vector2(cell_size - 0.5, cell_size - 0.5))
-		draw_rect(rect, _sand_color(game.next_color, int(cell.x), int(cell.y)))
+		draw_rect(rect, _sand_color(game.next_color, game.get_next_shade(index)))
 
 func _draw_board() -> void:
 	draw_style_box(_rounded_panel(), board_rect)
@@ -175,8 +182,9 @@ func _draw_board() -> void:
 	var grid_origin := board_rect.position + (board_rect.size - grid_size) * 0.5
 
 	draw_texture_rect(sand_texture, Rect2(grid_origin, grid_size), false)
-	for position in game.get_active_world_cells():
-		_draw_sand_cell(grid_origin, cell_size, int(position.x), int(position.y), game.active_color)
+	for particle in game.get_active_world_particles():
+		var position: Vector2 = particle["position"]
+		_draw_sand_cell(grid_origin, cell_size, int(position.x), int(position.y), game.active_color, particle["shade"])
 	_draw_clear_particles(grid_origin, cell_size)
 	if clear_flash > 0.0:
 		draw_rect(board_rect, Color(1.0, 0.8, 0.3, clear_flash * 0.16))
@@ -210,12 +218,12 @@ func _draw_board() -> void:
 	labels["ready"].visible = not status.empty()
 	labels["ready_hint"].visible = not hint.empty()
 
-func _draw_sand_cell(origin: Vector2, cell_size: float, column: int, row: int, color_index: int) -> void:
+func _draw_sand_cell(origin: Vector2, cell_size: float, column: int, row: int, color_index: int, shade: int) -> void:
 	var rect := Rect2(
 		origin + Vector2(column * cell_size, row * cell_size),
 		Vector2(cell_size, cell_size)
 	)
-	draw_rect(rect, _sand_color(color_index, column, row))
+	draw_rect(rect, _sand_color(color_index, shade))
 
 func _refresh_sand_texture() -> void:
 	sand_image.create(GameBoard.WIDTH, GameBoard.HEIGHT, false, Image.FORMAT_RGBA8)
@@ -225,7 +233,7 @@ func _refresh_sand_texture() -> void:
 			var color_index = game.get_cell(column, row)
 			var color := Color(0.0, 0.0, 0.0, 0.0)
 			if color_index != GameBoard.EMPTY:
-				color = _sand_color(color_index, column, row)
+				color = _sand_color(color_index, game.get_cell_shade(column, row))
 			sand_image.set_pixel(column, row, color)
 	sand_image.unlock()
 	if sand_texture.get_width() == 0:
@@ -235,34 +243,29 @@ func _refresh_sand_texture() -> void:
 	sand_texture_dirty = false
 	sand_texture_refresh_elapsed = 0.0
 
-func _sand_color(color_index: int, column: int, row: int) -> Color:
+func _sand_color(color_index: int, shade: int) -> Color:
 	var color = SAND_COLORS[color_index]
-	var variation = posmod(column * 17 + row * 31 + color_index * 13, 5)
-	if variation == 0:
+	if shade == 0:
 		return color.lightened(0.12)
-	if variation == 1:
+	if shade == 1:
 		return color.darkened(0.16)
-	if variation == 2:
+	if shade == 2:
 		return color.lightened(0.05)
 	return color
 
 func _draw_controls(margin: float, top: float, content_width: float, height: float) -> void:
 	action_rects.clear()
-	var gap := 12.0
-	var action_height := min(74.0, height)
-	var left_right_width := (content_width - gap * 4.0) * 0.28
-	var rotate_width := (content_width - gap * 4.0) * 0.11
-	var drop_width := content_width - left_right_width * 2.0 - rotate_width * 2.0 - gap * 4.0
+	var gap := 16.0
+	var action_height := min(104.0, height)
+	var action_width := (content_width - gap * 2.0) / 3.0
 	var x := margin
 	for definition in [
-		["LEFT", left_right_width, false],
-		["ROT L", rotate_width, false],
-		["DROP", drop_width, true],
-		["ROT R", rotate_width, false],
-		["RIGHT", left_right_width, false]
+		["LEFT", 0, false],
+		["DROP", 2, true],
+		["RIGHT", 4, false]
 	]:
-		var rect := Rect2(x, top, definition[1], action_height)
-		action_rects.append(rect)
+		var rect := Rect2(x, top, action_width, action_height)
+		action_rects.append({"rect": rect, "index": definition[1]})
 		_draw_button(rect, definition[0], definition[2], "action_%d" % action_rects.size())
 		x = rect.end.x + gap
 
@@ -270,9 +273,9 @@ func _draw_onboarding(screen: Vector2, margin: float) -> void:
 	var overlay := Rect2(margin, screen.y * 0.37, screen.x - margin * 2.0, screen.y * 0.26)
 	draw_style_box(_rounded_panel(), overlay)
 	_label("tutorial_title", "HOW TO PLAY", Rect2(overlay.position + Vector2(24.0, 24.0), Vector2(overlay.size.x - 48.0, 28.0)), TEXT)
-	_label("tutorial_one", "Move, rotate, and drop sand shapes.", Rect2(overlay.position + Vector2(24.0, 64.0), Vector2(overlay.size.x - 48.0, 24.0)), MUTED_TEXT)
+	_label("tutorial_one", "Use buttons to move and drop sand shapes.", Rect2(overlay.position + Vector2(24.0, 64.0), Vector2(overlay.size.x - 48.0, 24.0)), MUTED_TEXT)
 	_label("tutorial_two", "Connect matching colors from wall to wall.", Rect2(overlay.position + Vector2(24.0, 94.0), Vector2(overlay.size.x - 48.0, 24.0)), MUTED_TEXT)
-	_label("tutorial_continue", "Tap anywhere here to continue", Rect2(overlay.position + Vector2(24.0, 142.0), Vector2(overlay.size.x - 48.0, 24.0)), ACCENT)
+	_label("tutorial_continue", "Tap board: rotate. Double-tap: drop.", Rect2(overlay.position + Vector2(24.0, 142.0), Vector2(overlay.size.x - 48.0, 24.0)), ACCENT)
 	_set_onboarding_visible(true)
 
 func _input(event: InputEvent) -> void:
@@ -308,16 +311,36 @@ func _input(event: InputEvent) -> void:
 		return
 
 	for action in action_rects:
-		if action.has_point(point) and game_started and not paused and not game.game_over:
-			_handle_action(action_rects.find(action))
+		if action["rect"].has_point(point) and game_started and not paused and not game.game_over:
+			_handle_action(action["index"])
 			return
 
 	if board_rect.has_point(point) and game_started and not paused and not game.game_over:
+		_handle_board_tap(point, timestamp)
+
+func _process_pending_board_tap() -> void:
+	if not pending_board_tap or OS.get_ticks_msec() - pending_board_tap_timestamp < BOARD_DOUBLE_TAP_MSEC:
+		return
+	pending_board_tap = false
+	if not game_started or paused or game.game_over:
+		return
+	game.rotate(true)
+	audio.play_button()
+	_trigger_haptic()
+	update()
+
+func _handle_board_tap(point: Vector2, timestamp: int) -> void:
+	if pending_board_tap and timestamp - pending_board_tap_timestamp <= BOARD_DOUBLE_TAP_MSEC and point.distance_to(pending_board_tap_position) <= BOARD_DOUBLE_TAP_DISTANCE:
+		pending_board_tap = false
 		var column = int((point.x - board_rect.position.x) / board_rect.size.x * GameBoard.WIDTH)
 		game.drop_at(clamp(column, 0, GameBoard.WIDTH - 1))
 		audio.play_piece_release()
 		_trigger_haptic()
 		update()
+		return
+	pending_board_tap = true
+	pending_board_tap_position = point
+	pending_board_tap_timestamp = timestamp
 
 func _handle_play_button() -> void:
 	if not game_started or game.game_over:
@@ -374,7 +397,7 @@ func _start_clear_effect(events: Array) -> void:
 		clear_particles.append(
 			{
 				"position": event["position"] + Vector2(0.5, 0.5),
-				"color": _sand_color(event["color"], int(event["position"].x), int(event["position"].y)),
+				"color": _sand_color(event["color"], event["shade"]),
 				"offset": Vector2.ZERO,
 				"velocity": Vector2(rand_range(-2.0, 2.0), rand_range(-3.4, -1.2)),
 				"delay": _clear_wave_delay(event["position"], pattern),

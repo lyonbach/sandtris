@@ -17,7 +17,9 @@ const BASE_SHAPES := [
 ]
 
 var cells := []
+var cell_shades := []
 var active_cells := []
+var active_shades := []
 var active_origin := Vector2()
 var active_color := 0
 var aim_x = SPAWN_COLUMN
@@ -26,6 +28,7 @@ var clears := 0
 var game_over := false
 var next_shape_index := 0
 var next_color := 0
+var next_shades := []
 var is_dropping := false
 var drop_steps := 0
 var clear_events := []
@@ -37,12 +40,17 @@ func _init() -> void:
 
 func reset() -> void:
 	cells.clear()
+	cell_shades.clear()
 	for _row in range(HEIGHT):
 		var row := []
+		var shade_row := []
 		for _column in range(WIDTH):
 			row.append(EMPTY)
+			shade_row.append(0)
 		cells.append(row)
+		cell_shades.append(shade_row)
 	active_cells.clear()
+	active_shades.clear()
 	aim_x = SPAWN_COLUMN
 	score = 0
 	clears = 0
@@ -150,14 +158,25 @@ func piece_tick_interval() -> float:
 func get_cell(column: int, row: int) -> int:
 	return cells[row][column]
 
-func get_active_world_cells() -> Array:
+func get_cell_shade(column: int, row: int) -> int:
+	return cell_shades[row][column]
+
+func get_active_world_particles() -> Array:
 	var result = []
-	for cell in active_cells:
-		result.append(active_origin + cell)
+	for index in range(active_cells.size()):
+		result.append(
+			{
+				"position": active_origin + active_cells[index],
+				"shade": active_shades[index]
+			}
+		)
 	return result
 
 func get_next_cells() -> Array:
 	return _scaled_shape(BASE_SHAPES[next_shape_index])
+
+func get_next_shade(index: int) -> int:
+	return next_shades[index]
 
 func consume_clear_events() -> Array:
 	var events = clear_events
@@ -166,6 +185,7 @@ func consume_clear_events() -> Array:
 
 func _spawn_piece() -> void:
 	active_cells = _scaled_shape(BASE_SHAPES[next_shape_index])
+	active_shades = next_shades.duplicate()
 	active_color = next_color
 	is_dropping = false
 	drop_steps = 0
@@ -181,6 +201,9 @@ func _spawn_piece() -> void:
 func _choose_next_piece() -> void:
 	next_shape_index = randi() % BASE_SHAPES.size()
 	next_color = randi() % 3
+	next_shades.clear()
+	for _cell in _scaled_shape(BASE_SHAPES[next_shape_index]):
+		next_shades.append(randi() % 6)
 
 func _can_place(origin: Vector2, shape: Array) -> bool:
 	for cell in shape:
@@ -194,10 +217,12 @@ func _can_place(origin: Vector2, shape: Array) -> bool:
 	return true
 
 func _lock_piece() -> void:
-	for cell in active_cells:
-		var position: Vector2 = active_origin + cell
+	for index in range(active_cells.size()):
+		var position: Vector2 = active_origin + active_cells[index]
 		cells[int(position.y)][int(position.x)] = active_color
+		cell_shades[int(position.y)][int(position.x)] = active_shades[index]
 	active_cells.clear()
+	active_shades.clear()
 	_spawn_piece()
 
 func _advance_sand() -> bool:
@@ -223,7 +248,9 @@ func _advance_sand() -> bool:
 
 func _move_cell(from_column: int, from_row: int, to_column: int, to_row: int) -> void:
 	cells[to_row][to_column] = cells[from_row][from_column]
+	cell_shades[to_row][to_column] = cell_shades[from_row][from_column]
 	cells[from_row][from_column] = EMPTY
+	cell_shades[from_row][from_column] = 0
 
 func _clear_connected_colors() -> int:
 	var cleared_particles = 0
@@ -248,8 +275,15 @@ func _clear_connected_colors() -> int:
 				touches_right = touches_right or int(position.x) == WIDTH - 1
 			if touches_left and touches_right:
 				for position in group:
-					clear_events.append({"position": position, "color": color})
+					clear_events.append(
+						{
+							"position": position,
+							"color": color,
+							"shade": cell_shades[int(position.y)][int(position.x)]
+						}
+					)
 					cells[int(position.y)][int(position.x)] = EMPTY
+					cell_shades[int(position.y)][int(position.x)] = 0
 				cleared_particles += group.size()
 				cleared_groups += 1
 	if cleared_particles > 0:
