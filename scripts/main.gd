@@ -111,14 +111,15 @@ func _draw() -> void:
 	ui.rect_size = screen
 	var margin := screen.x * 0.055
 	var content_width := screen.x - margin * 2.0
+	var top_inset := screen.y * 0.055
 	var header_height := max(150.0, screen.y * 0.15)
 	var controls_height := max(128.0, screen.y * 0.12)
-	var board_height := min(content_width * 1.35, screen.y - header_height - controls_height - margin * 3.0)
+	var board_height := min(content_width * 1.35, screen.y - top_inset - header_height - controls_height - margin * 3.0)
 
 	draw_rect(Rect2(Vector2.ZERO, screen), BACKGROUND)
-	_draw_header(margin, header_height, content_width)
+	_draw_header(margin, top_inset, header_height, content_width)
 
-	board_rect = Rect2(margin, header_height + margin, content_width, board_height)
+	board_rect = Rect2(margin, top_inset + header_height + margin, content_width, board_height)
 	draw_set_transform(_board_shake_offset(), 0.0, Vector2.ONE)
 	_draw_board()
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
@@ -131,28 +132,28 @@ func _draw() -> void:
 	if profiling_enabled:
 		profile_draw_ms = float(OS.get_ticks_usec() - draw_started_at) / 1000.0
 
-func _draw_header(margin: float, header_height: float, content_width: float) -> void:
-	_label("title", "SANDTRIS", Rect2(margin, header_height * 0.12, 260.0, 42.0), TEXT)
-	_label("score", "SCORE  %06d" % game.score, Rect2(margin, header_height * 0.48, 250.0, 26.0), ACCENT)
-	_label("best", "BEST  %06d" % game_state.high_score, Rect2(margin, header_height * 0.72, 250.0, 24.0), MUTED_TEXT)
-	_label("combo", "COMBO x%d" % game.combo_multiplier, Rect2(margin + 280.0, header_height * 0.50, 148.0, 24.0), ACCENT)
+func _draw_header(margin: float, top: float, header_height: float, content_width: float) -> void:
+	_label("title", "SANDTRIS", Rect2(margin, top + header_height * 0.12, 260.0, 42.0), TEXT)
+	_label("score", "SCORE  %06d" % game.score, Rect2(margin, top + header_height * 0.48, 250.0, 26.0), ACCENT)
+	_label("best", "BEST  %06d" % game_state.high_score, Rect2(margin, top + header_height * 0.72, 250.0, 24.0), MUTED_TEXT)
+	_label("combo", "COMBO x%d" % game.combo_multiplier, Rect2(margin + 280.0, top + header_height * 0.50, 148.0, 24.0), ACCENT)
 	labels["combo"].visible = game.combo_multiplier > 1
 	if profiling_enabled:
 		_label(
 			"performance",
 			"%03d FPS  |  %.2f ms SIM  |  %.2f ms DRAW" % [Engine.get_frames_per_second(), profile_update_ms, profile_draw_ms],
-			Rect2(margin, header_height * 0.89, 350.0, 18.0),
+			Rect2(margin, top + header_height * 0.89, 350.0, 18.0),
 			MUTED_TEXT
 		)
 
-	settings_button_rect = Rect2(margin + content_width - 136.0, header_height * 0.20, 136.0, 64.0)
+	settings_button_rect = Rect2(margin + content_width - 136.0, top + header_height * 0.20, 136.0, 64.0)
 	_draw_button(settings_button_rect, "SETTINGS", false, "settings")
 	play_button_rect = Rect2(settings_button_rect.position.x - 148.0, settings_button_rect.position.y, 136.0, 64.0)
 	var play_label := "PLAY"
 	if game_started and not game.game_over:
 		play_label = "RESUME" if paused else "PAUSE"
 	_draw_button(play_button_rect, play_label, true, "play")
-	_draw_next_piece(margin + content_width - 164.0, header_height * 0.66, header_height * 0.30)
+	_draw_next_piece(margin + content_width - 164.0, top + header_height * 0.66, header_height * 0.30)
 
 func _draw_next_piece(x: float, y: float, height: float) -> void:
 	_label("next", "NEXT", Rect2(x, y, 48.0, 20.0), MUTED_TEXT)
