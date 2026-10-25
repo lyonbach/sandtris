@@ -88,6 +88,7 @@ func _process(delta: float) -> void:
 		var piece_locked = game.advance_piece()
 		if piece_locked:
 			audio.play_sand_settle()
+			_trigger_haptic(12)
 		static_sand_changed = piece_locked or static_sand_changed
 	if clear_check_elapsed >= CLEAR_CHECK_INTERVAL:
 		clear_check_elapsed -= CLEAR_CHECK_INTERVAL
@@ -386,6 +387,7 @@ func _record_score_if_needed() -> void:
 		score_recorded = true
 		game_state.record_score(game.score)
 		audio.play_game_over()
+		_trigger_haptic(60)
 
 func _start_clear_effect(events: Array) -> void:
 	shake_time = 0.16
@@ -406,7 +408,7 @@ func _start_clear_effect(events: Array) -> void:
 			}
 		)
 	if game_state.haptics_enabled and OS.has_feature("mobile"):
-		Input.vibrate_handheld(35)
+		_trigger_haptic(35)
 
 func _advance_clear_particles(delta: float) -> bool:
 	for index in range(clear_particles.size() - 1, -1, -1):
@@ -462,9 +464,9 @@ func _board_shake_offset() -> Vector2:
 		rand_range(-shake_strength, shake_strength) * fade
 	)
 
-func _trigger_haptic() -> void:
+func _trigger_haptic(duration := 25) -> void:
 	if game_state.haptics_enabled and OS.has_feature("mobile"):
-		Input.vibrate_handheld(25)
+		Input.vibrate_handheld(duration)
 
 func _draw_button(rect: Rect2, label: String, emphasized: bool, key: String) -> void:
 	draw_style_box(_rounded_panel(PANEL_ACTIVE if emphasized else PANEL), rect)
