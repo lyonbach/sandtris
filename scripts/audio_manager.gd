@@ -106,6 +106,11 @@ func _queue_effect(kind: String, duration: float, start_frequency: float, end_fr
 	)
 
 func _load_music(path: String) -> AudioStreamOGGVorbis:
+	var imported_stream = ResourceLoader.load(path)
+	if imported_stream is AudioStreamOGGVorbis:
+		imported_stream.loop = true
+		return imported_stream
+
 	var file := File.new()
 	if file.open(path, File.READ) != OK:
 		push_error("Could not open music track: %s" % path)
